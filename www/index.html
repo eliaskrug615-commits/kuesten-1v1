@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>1v1 Küsten-Build-Battle (3D Shooter)</title>
+<style>
+  :root {
+    --safe-top: env(safe-area-inset-top, 12px);
+    --safe-bottom: env(safe-area-inset-bottom, 12px);
+    --safe-left: env(safe-area-inset-left, 12px);
+    --safe-right: env(safe-area-inset-right, 12px);
+    --accent-blue: #00d2ff;
+    --accent-red: #ff3b30;
+    --accent-gold: #ffcc00;
+    --glass: rgba(12, 18, 28, 0.72);
+    --border: rgba(255, 255, 255, 0.22);
+  }
+  * { box-sizing: border-box; user-select: none; -webkit-user-select: none; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #0a1420; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    color: #fff; touch-action: none;
+  }
+  #game-canvas { display: block; width: 100%; height: 100%; }
+
+  /* Hochformat-Warnung für Touch */
+  #portrait-warning {
+    display: none; position: fixed; inset: 0; z-index: 9999;
+    background: #0a1420; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+  }
+  @media (orientation: portrait) and (pointer: coarse) {
+    #portrait-warning { display: flex; }
+  }
+  .rotate-icon { font-size: 56px; margin-bottom: 16px; animation: spin 2s infinite ease-in-out; }
+  @keyframes spin { 0%,100%{transform:rotate(0deg)} 50%{transform:rotate(-90deg)} }
+
+  /* Schadens-Vignette */
+  #damage-vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 15;
+    box-shadow: inset 0 0 90px 35px rgba(255, 25, 25, 0.85);
+    opacity: 0; transition: opacity 0.12s ease-out;
+  }
+
+  /* HUD Layout */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+
+  /* Punktestand oben Mitte */
+  #scoreboard {
+    position: absolute; top: var(--safe-top); left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    background: var(--glass); border: 1px solid var(--border);
+    padding: 8px 20px; border-radius: 14px; backdrop-filter: blur(6px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .score-box { display: flex; flex-direction: column; align-items: center; min-width: 64px; }
+  .score-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8; }
+  .score-val { font-size: 26px; font-weight: 800; line-height: 1.1; }
+  .player-color { color: var(--accent-blue); }
+  .bot-color { color: var(--accent-red); }
+  .score-divider { font-size: 14px; font-weight: 700; opacity: 0.6; }
+
+  /* Benachrichtigungen */
+  #banner-msg {
+    position: absolute; top: calc(var(--safe-top) + 74px); left: 50%; transform: translateX(-50%);
+    font-size: 26px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px;
+    text-shadow: 0 3px 12px rgba(0,0,0,0.9); color: var(--accent-gold);
+    opacity: 0; transition: opacity 0.25s, transform 0.25s; pointer-events: none;
+  }
+  #banner-msg.show { opacity: 1; transform: translateX(-50%) scale(1.06); }
+
+  /* Fadenkreuz & Hitmarker */
+  #crosshair {
+    position: absolute; top: 50%; left: 50%; width: 24px; height: 24px;
+    transform: translate(-50%, -50%); pointer-events: none;
+  }
+  .ch-line { position: absolute; background: rgba(255,255,255,0.9); box-shadow: 0 0 3px #000; }
+  .ch-top { width: 2px; height: 6px; left: 11px; top: 0; }
+  .ch-bot { width: 2px; height: 6px; left: 11px; bottom: 0; }
+  .ch-left { width: 6px; height: 2px; top: 11px; left: 0; }
+  .ch-right { width: 6px; height: 2px; top: 11px; right: 0; }
+  .ch-dot { width: 3px; height: 3px; border-radius: 50%; background: #fff; position: absolute; top: 10.5px; left: 10.5px; }
+
+  #hitmarker {
+    position: absolute; top: 50%; left: 50%; width: 28px; height: 28px;
+    transform: translate(-50%, -50%) rotate(45deg); opacity: 0; pointer-events: none;
+  }
+  #hitmarker::before, #hitmarker::after {
+    content: ''; position: absolute; background: #fff;
+  }
+  #hitmarker::before { width: 2px; height: 28px; left: 13px; top: 0; }
+  #hitmarker::after { width: 28px; height: 2px; top: 13px; left: 0; }
+  #hitmarker.headshot::before, #hitmarker.headshot::after { background: #ff3b30; }
+
+  /* Edit-Anleitung & Cursor im Edit-Modus */
+  #edit-hint {
+    position: absolute; top: calc(50% + 36px); left: 50%; transform: translateX(-50%);
+    background: rgba(0, 140, 255, 0.85); padding: 6px 14px; border-radius: 8px;
+    font-size: 13px; font-weight: 700; display: none; text-align: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
+
+  /* Unten links: HP & Schild + Eingabemodus */
+  #status-panel {
+    position: absolute; bottom: var(--safe-bottom); left: var(--safe-left);
+    background: var(--glass); border: 1px solid var(--border);
+    padding: 10px 14px; border-radius: 12px; width: 240px; backdrop-filter: blur(6px);
+  }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .bar-row:last-child { margin-bottom: 0; }
+  .bar-icon { font-size: 13px; font-weight: 800; width: 26px; }
+  .bar-bg { flex: 1; height: 12px; background: rgba(0,0,0,0.55); border-radius: 6px; overflow: hidden; }
+  .bar-fill { height: 100%; transition: width 0.12s; }
+  #shield-fill { background: linear-gradient(90deg, #007aff, #00d2ff); width: 100%; }
+  #hp-fill { background: linear-gradient(90deg, #28cd41, #5ef576); width: 100%; }
+  .bar-num { font-size: 13px; font-weight: 700; width: 28px; text-align: right; }
+
+  #input-indicator {
+    position: absolute; top: var(--safe-top); left: var(--safe-left);
+    background: var(--glass); border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 10px; font-size: 12px; display: flex; align-items: center; gap: 8px;
+    pointer-events: auto;
+  }
+  #sens-btn {
+    background: rgba(255,255,255,0.15); border: none; color: #fff; padding: 3px 7px;
+    border-radius: 5px; font-size: 11px; cursor: pointer; display: none;
+  }
+
+  /* Unten Mitte: Waffen & Bauteile-Leiste */
+  #loadout-bar {
+    position: absolute; bottom: var(--safe-bottom); left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  #build-set-badge {
+    font-size: 11px; font-weight: 700; background: rgba(0,0,0,0.65);
+    padding: 2px 10px; border-radius: 10px; border: 1px solid var(--border); display: none;
+  }
+  .slots-row { display: flex; gap: 6px; }
+  .slot {
+    width: 56px; height: 58px; background: var(--glass); border: 1.5px solid var(--border);
+    border-radius: 10px; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; position: relative; transition: transform 0.1s, border-color 0.1s;
+  }
+  .slot.active {
+    border-color: var(--accent-gold); background: rgba(255, 204, 0, 0.22);
+    transform: translateY(-4px);
+  }
+  .slot-icon { font-size: 18px; font-weight: 800; }
+  .slot-name { font-size: 9px; text-transform: uppercase; opacity: 0.85; margin-top: 2px; }
+  .slot-key {
+    position: absolute; top: 3px; right: 4px; font-size: 9px; font-weight: 800;
+    background: rgba(0,0,0,0.65); padding: 1px 4px; border-radius: 4px; color: #ddd;
+  }
+
+  /* Touch Controls */
+  #touch-controls { display: none; position: fixed; inset: 0; z-index: 30; pointer-events: none; }
+  #joystick-zone {
+    position: absolute; left: 0; top: 0; width: 45%; height: 100%; pointer-events: auto;
+  }
+  #look-zone {
+    position: absolute; right: 0; top: 0; width: 55%; height: 100%; pointer-events: auto;
+  }
+  #joystick-base {
+    position: absolute; width: 110px; height: 110px; border-radius: 50%;
+    background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.3);
+    display: none; transform: translate(-50%, -50%); pointer-events: none;
+  }
+  #joystick-knob {
+    position: absolute; width: 46px; height: 46px; border-radius: 50%;
+    background: rgba(255,255,255,0.55); left: 32px; top: 32px;
+  }
+  .touch-btn {
+    position: absolute; pointer-events: auto; border-radius: 50%;
+    background: rgba(15, 22, 34, 0.72); border: 2px solid rgba(255,255,255,0.38);
+    color: #fff; font-weight: 800; font-size: 12px; display: flex; align-items: center;
+    justify-content: center; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+  }
+  .touch-btn:active, .touch-btn.pressed { background: rgba(255, 204, 0, 0.5); border-color: #ffcc00; }
+  #btn-fire { right: calc(var(--safe-right) + 18px); bottom: calc(var(--safe-bottom) + 74px); width: 76px; height: 76px; font-size: 14px; background: rgba(255, 59, 48, 0.55); }
+  #btn-jump { right: calc(var(--safe-right) + 106px); bottom: calc(var(--safe-bottom) + 22px); width: 58px; height: 58px; }
+  #btn-wall { right: calc(var(--safe-right) + 106px); bottom: calc(var(--safe-bottom) + 92px); width: 54px; height: 54px; }
+  #btn-floor { right: calc(var(--safe-right) + 94px); bottom: calc(var(--safe-bottom) + 158px); width: 54px; height: 54px; }
+  #btn-ramp { right: calc(var(--safe-right) + 28px); bottom: calc(var(--safe-bottom) + 166px); width: 54px; height: 54px; }
+  #btn-buildplus { right: calc(var(--safe-right) + 168px); bottom: calc(var(--safe-bottom) + 132px); width: 56px; height: 56px; border-color: var(--accent-blue); }
+  #btn-edit { right: calc(var(--safe-right) + 174px); bottom: calc(var(--safe-bottom) + 64px); width: 54px; height: 54px; }
+  #btn-weapon { right: calc(var(--safe-right) + 24px); bottom: calc(var(--safe-bottom) + 12px); width: 54px; height: 54px; }
+
+  #radial-menu {
+    display: none; position: fixed; right: calc(var(--safe-right) + 140px); bottom: calc(var(--safe-bottom) + 120px);
+    width: 170px; height: 170px; pointer-events: auto; z-index: 35;
+  }
+  #radial-menu.open { display: block; }
+  .radial-item {
+    position: absolute; width: 62px; height: 62px; border-radius: 50%;
+    background: rgba(0, 160, 255, 0.88); border: 2px solid #fff;
+    color: #fff; font-weight: 800; font-size: 11px; display: flex; align-items: center; justify-content: center;
+  }
+  #rad-stairs { top: 0; left: 54px; }
+  #rad-corner { bottom: 16px; left: 4px; }
+  #rad-pyramid { bottom: 16px; right: 4px; }
+
+  /* Start- & Siegbildschirm */
+  .overlay-screen {
+    position: fixed; inset: 0; z-index: 50; background: rgba(8, 14, 24, 0.84);
+    backdrop-filter: blur(8px); display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 24px;
+  }
+  .overlay-screen h1 {
+    font-size: clamp(28px, 5vw, 48px); font-weight: 900; letter-spacing: 1px;
+    background: linear-gradient(90deg, #00d2ff, #ffffff, #ffcc00);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px;
+  }
+  .overlay-screen p { max-width: 580px; font-size: 15px; line-height: 1.5; color: #cfd8e3; margin-bottom: 22px; }
+  .primary-btn {
+    background: linear-gradient(135deg, #0095ff, #00d2ff); border: none; color: #04101c;
+    font-weight: 900; font-size: 18px; padding: 14px 36px; border-radius: 12px;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
+    box-shadow: 0 6px 24px rgba(0, 210, 255, 0.45); transition: transform 0.12s;
+  }
+  .primary-btn:hover { transform: scale(1.04); }
+  .controls-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px;
+    max-width: 720px; width: 100%; margin-top: 24px; text-align: left;
+  }
+  .ctrl-card {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    padding: 12px; border-radius: 10px; font-size: 12px; line-height: 1.45;
+  }
+  .ctrl-card strong { color: var(--accent-gold); display: block; margin-bottom: 4px; font-size: 13px; }
+  #victory-screen { display: none; }
+</style>
+</head>
+<body>
+
+<div id="portrait-warning">
+  <div class="rotate-icon">📱</div>
+  <h2>Bitte Gerät drehen</h2>
+  <p style="margin-top:8px;opacity:0.8;">Dieses 3D-Spiel ist für das Querformat optimiert.</p>
+</div>
+
+<canvas id="game-canvas"></canvas>
+<div id="damage-vignette"></div>
+
+<div id="hud">
+  <div id="input-indicator">
+    <span id="input-label">Eingabe: Maus &amp; Tastatur</span>
+    <button id="sens-btn" title="Controller-Empfindlichkeit umschalten">Empf.: Mittel</button>
+  </div>
+
+  <div id="scoreboard">
+    <div class="score-box">
+      <span class="score-label">Du</span>
+      <span class="score-val player-color" id="score-player">0</span>
+    </div>
+    <div class="score-divider">ZIEL: 3</div>
+    <div class="score-box">
+      <span class="score-label">Bot</span>
+      <span class="score-val bot-color" id="score-bot">0</span>
+    </div>
+  </div>
+
+  <div id="banner-msg">ELIMINIERUNG!</div>
+
+  <div id="crosshair">
+    <div class="ch-line ch-top"></div>
+    <div class="ch-line ch-bot"></div>
+    <div class="ch-line ch-left"></div>
+    <div class="ch-line ch-right"></div>
+    <div class="ch-dot"></div>
+  </div>
+  <div id="hitmarker"></div>
+  <div id="edit-hint">EDIT-MODUS: Felder wählen &amp; bestätigen</div>
+
+  <div id="status-panel">
+    <div class="bar-row">
+      <span class="bar-icon" style="color:#00d2ff;">SHD</span>
+      <div class="bar-bg"><div class="bar-fill" id="shield-fill"></div></div>
+      <span class="bar-num" id="shield-num">50</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-icon" style="color:#5ef576;">HP</span>
+      <div class="bar-bg"><div class="bar-fill" id="hp-fill"></div></div>
+      <span class="bar-num" id="hp-num">100</span>
+    </div>
+  </div>
+
+  <div id="loadout-bar">
+    <div id="build-set-badge">Bau-Set 1 (RB wechseln)</div>
+    <div class="slots-row" id="slots-row"></div>
+  </div>
+</div>
+
+<!-- Touch-Steuerung -->
+<div id="touch-controls">
+  <div id="joystick-zone">
+    <div id="joystick-base"><div id="joystick-knob"></div></div>
+  </div>
+  <div id="look-zone"></div>
+
+  <div class="touch-btn" id="btn-fire">FEUER</div>
+  <div class="touch-btn" id="btn-jump">SPRUNG</div>
+  <div class="touch-btn" id="btn-wall">WAND</div>
+  <div class="touch-btn" id="btn-floor">BODEN</div>
+  <div class="touch-btn" id="btn-ramp">RAMPE</div>
+  <div class="touch-btn" id="btn-buildplus">BAUEN+</div>
+  <div class="touch-btn" id="btn-edit">EDIT</div>
+  <div class="touch-btn" id="btn-weapon">WAFFE</div>
+
+  <div id="radial-menu">
+    <div class="radial-item" id="rad-stairs">TREPPE</div>
+    <div class="radial-item" id="rad-corner">ECKE</div>
+    <div class="radial-item" id="rad-pyramid">PYRAMIDE</div>
+  </div>
+</div>
+
+<!-- Startbildschirm -->
+<div class="overlay-screen" id="start-screen">
+  <h1>1v1 KÜSTEN-ARENA</h1>
+  <p>Baue Deckung, editiere Fenster in deine Wände und eliminiere deinen Gegner dreimal, um das Match in der sonnigen Küstenmetropole zu gewinnen.</p>
+  <button class="primary-btn" id="start-btn">Match starten</button>
+  <div class="controls-grid">
+    <div class="ctrl-card">
+      <strong>Maus &amp; Tastatur</strong>
+      WASD Laufen • Leertaste Sprung<br>
+      Q Wand • F Boden • C Rampe • Z Treppe • X Ecke • V Pyramide<br>
+      G Edit (Klick wählen, Enter bestätigen, R Reset) • 1/2 Waffe
+    </div>
+    <div class="ctrl-card">
+      <strong>Controller (Xbox / PS)</strong>
+      Sticks Laufen/Zielen • RT Feuer • A Sprung<br>
+      X/Y/B Bauen (RB wechselt Set 1 &amp; 2)<br>
+      LB Edit (Stick Cursor, RT Wahl, A OK, B Reset) • D-Pad Waffe
+    </div>
+    <div class="ctrl-card">
+      <strong>Touchscreen</strong>
+      Links Virtueller Stick • Rechts Umsehen<br>
+      Buttons rechts für Feuer, Sprung, Bauen, Edit &amp; BAUEN+ Radialmenü
+    </div>
+  </div>
+</div>
+
+<!-- Siegbildschirm -->
+<div class="overlay-screen" id="victory-screen">
+  <h1 id="victory-title">SIEG!</h1>
+  <p id="victory-sub">Du hast das 1v1-Duell mit 3 : 0 gewonnen.</p>
+  <button class="primary-btn" id="rematch-btn">Revanche</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  // ============================================================================
+  // 1. KONSTANTEN & SPIELZUSTAND
+  // ============================================================================
+  const CELL = 4.0;             // 4x4 Bauraster
+  const WALL_H = 4.0;           // Wandhöhe 4 Einheiten
+  const HALF_MAP = 150.0;       // 300x300 Karte (-150 bis +150)
+  const WIN_KILLS = 3;
+  const GRAVITY = 28.0;
+  const JUMP_VEL = 11.2;
+  const PLAYER_SPEED = 9.2;
+  const PLAYER_RADIUS = 0.55;
+  const PLAYER_HEIGHT = 1.95;
+  const STEP_UP_MAX = 0.8;
+
+  const BUILD_TYPES = ['wall', 'floor', 'ramp', 'stairs', 'corner', 'pyramid'];
+  const BUILD_NAMES = {
+    wall: 'Wand', floor: 'Boden', ramp: 'Rampe',
+    stairs: 'Treppe', corner: 'Ecke', pyramid: 'Pyramide'
+  };
+  const BUILD_ICONS = {
+    wall: '▮', floor: '▬', ramp: '◢',
+    stairs: '▤', corner: '∟', pyramid: '▲'
+  };
+
+  const WEAPONS = {
+    ar: {
+      name: 'Sturmgewehr', short: 'AR', fireRate: 0.13, damage: 22, headMult: 1.75,
+      pellets: 1, spread: 0.014, range: 160, falloffStart: 60, minMult: 0.65
+    },
+    sg: {
+      name: 'Schrotflinte', short: 'SG', fireRate: 0.85, damage: 13, headMult: 1.5,
+      pellets: 8, spread: 0.075, range: 45, falloffStart: 10, minMult: 0.25
+    }
+  };
+
+  const state = {
+    started: false,
+    gameOver: false,
+    roundResetting: false,
+    playerScore: 0,
+    botScore: 0,
+    inputMode: 'kbm', // 'kbm' | 'gamepad' | 'touch'
+    gamepadIndex: null,
+    gamepadLayout: 'xbox', // 'xbox' | 'ps'
+    gpSensitivityIdx: 1, // 0: Niedrig, 1: Mittel, 2: Hoch
+    gpBuildSet: 0, // 0: Wand/Boden/Rampe, 1: Treppe/Ecke/Pyramide
+    mode: 'combat', // 'combat' | 'build' | 'edit'
+    selectedBuild: 'wall',
+    activeWeapon: 'ar',
+    fireCooldown: 0,
+    mouseDown: false,
+    touchFiring: false,
+    // Edit-Zustand
+    editTarget: null,
+    editMask: [1,1,1, 1,1,1, 1,1,1], // 1 = solide, 0 = Loch
+    editCursor: 4, // 0..8 für Controller
+    gpPrevButtons: {}
+  };
+
+  const GP_SENS_LEVELS = [
+    { label: 'Niedrig', val: 1.6 },
+    { label: 'Mittel', val: 2.5 },
+    { label: 'Hoch', val: 3.6 }
+  ];
+
+  // ============================================================================
+  // 2. THREE.JS SZENE, RENDERER, LICHT & KAMERA
+  // ============================================================================
+  const canvas = document.getElementById('game-canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x7ec8f5);
+  scene.fog = new THREE.FogExp2(0x9bd7f8, 0.0034);
+
+  const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.2, 420);
+
+  // Beleuchtung: Sonne folgt Spieler für scharfe, weiche Schatten
+  const hemiLight = new THREE.HemisphereLight(0xdff4ff, 0xc2a878, 0.72);
+  scene.add(hemiLight);
+
+  const sunLight = new THREE.DirectionalLight(0xfff4dc, 1.15);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.width = 2048;
+  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.camera.near = 5;
+  sunLight.shadow.camera.far = 160;
+  const dShadow = 52;
+  sunLight.shadow.camera.left = -dShadow;
+  sunLight.shadow.camera.right = dShadow;
+  sunLight.shadow.camera.top = dShadow;
+  sunLight.shadow.camera.bottom = -dShadow;
+  sunLight.shadow.bias = -0.0005;
+  scene.add(sunLight);
+  scene.add(sunLight.target);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ============================================================================
+  // 3. PROZEDURALE TEXTUREN & KÜSTENMETROPOLEN-WELT (300x300)
+  // ============================================================================
+  const staticColliders = []; // { minX, maxX, minY, maxY, minZ, maxZ, mesh }
+  const worldGroup =
