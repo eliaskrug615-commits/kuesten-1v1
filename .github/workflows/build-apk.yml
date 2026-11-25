@@ -33,18 +33,19 @@ jobs:
           printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$ANDROID_HOME/licenses/android-sdk-license"
           printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
 
-      - name: Capacitor installieren & Android-Projekt initialisieren
+      - name: Capacitor 6 installieren & Android-Projekt einrichten
         run: |
           npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           npx cap init "1v1 Kuesten Arena" "com.deinname.kuesten1v1" --web-dir=www
           npx cap add android
+          sed -i 's/android:screenOrientation="portrait"/android:screenOrientation="landscape"/g' android/app/src/main/AndroidManifest.xml || true
           npx cap sync android
 
       - name: Debug-APK bauen
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon
 
       - name: APK als Artifact hochladen
         uses: actions/upload-artifact@v4
