@@ -1,19 +1,54 @@
-<script>
-  window.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('start-btn') ||
-      Array.from(document.querySelectorAll('button')).find(b => /match starten/i.test(b.textContent || ''));
-    if (btn && typeof window.startMatch === 'function') {
-      const triggerStart = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const startScreen = document.getElementById('start-screen');
-        const portraitWarn = document.getElementById('portrait-warning');
-        if (portraitWarn) portraitWarn.style.display = 'none';
-        if (startScreen) startScreen.style.display = 'none';
-        try { window.startMatch(); } catch (_) {}
-      };
-      btn.addEventListener('pointerup', triggerStart, { passive: false });
-      btn.addEventListener('touchend', triggerStart, { passive: false });
-    }
-  });
-</script>
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Java 21 einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Android SDK Lizenzen schreiben
+        run: |
+          mkdir -p "$ANDROID_HOME/licenses"
+          printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$ANDROID_HOME/licenses/android-sdk-license"
+          printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+
+      - name: Capacitor 6 installieren & Android-Projekt einrichten
+        run: |
+          npm init -y
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npx cap init "1v1 Kuesten Arena" "com.deinname.kuesten1v1" --web-dir=www
+          npx cap add android
+          sed -i 's/android:screenOrientation="portrait"/android:screenOrientation="landscape"/g' android/app/src/main/AndroidManifest.xml || true
+          npx cap sync android
+
+      - name: Debug-APK bauen
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+
+      - name: APK als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: kuesten-1v1-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
